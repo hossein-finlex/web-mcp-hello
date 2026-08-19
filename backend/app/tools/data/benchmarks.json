@@ -1,0 +1,11 @@
+{
+  "_source": "Synthetic demo market data. Stands in for a rate benchmarking subscription; the numbers are invented.",
+  "bands": {
+    "D&O":   { "rate_low": 0.0035, "rate_high": 0.0075, "trend": "softening", "commentary": "Capacity returning; renewals broadly flat to -10%." },
+    "Cyber": { "rate_low": 0.0080, "rate_high": 0.0160, "trend": "flat",      "commentary": "Rate reductions have stalled; insurers holding on ransomware sublimits." },
+    "PI":    { "rate_low": 0.0050, "rate_high": 0.0110, "trend": "hardening", "commentary": "Construction and valuation risks seeing +5-15%." },
+    "Crime": { "rate_low": 0.0040, "rate_high": 0.0080, "trend": "flat",      "commentary": "Stable; social engineering sublimits under scrutiny." },
+    "EPLI":  { "rate_low": 0.0080, "rate_high": 0.0150, "trend": "hardening", "commentary": "Claims frequency up; expect +10%." },
+    "W&I":   { "rate_low": 0.0070, "rate_high": 0.0140, "trend": "softening", "commentary": "Competitive; deal flow down, capacity plentiful." }
+  }
+}

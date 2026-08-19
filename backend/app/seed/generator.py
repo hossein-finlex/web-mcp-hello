@@ -23,7 +23,7 @@ from __future__ import annotations
 import random
 from datetime import date, timedelta
 
-from .seed_data import PRODUCT_PREFIX, add_months
+from .curated import PRODUCT_PREFIX, add_months
 
 # (company, industry) — all fictional.
 COMPANIES = [
@@ -263,7 +263,7 @@ def generate_contracts(
 
 def full_book(total: int = 50, today: date | None = None) -> list[dict]:
     """The curated twelve plus generated contracts up to `total`."""
-    from .seed_data import curated_contracts
+    from .curated import curated_contracts
 
     curated = curated_contracts(today)
     remaining = max(0, total - len(curated))
