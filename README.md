@@ -44,6 +44,18 @@ needed if you want to re-seed or change the size (`--force`, `--total 200`).
 
 ---
 
+## Documentation
+
+[**WebMCP in Practice**](docs/webmcp-in-practice.html) — what problem an in-app
+assistant actually has, what WebMCP is, and how the browser, backend and model
+communicate, with diagrams of the tool-call sequence and the server-to-page
+handoff. Open the file in a browser.
+
+[**CLAUDE.md**](CLAUDE.md) — orientation for working in this repository:
+commands, the layering rules, and the traps already hit here.
+
+---
+
 ## Try these
 
 | Ask | What you should see |

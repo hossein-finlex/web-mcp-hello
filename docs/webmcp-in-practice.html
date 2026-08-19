@@ -1,0 +1,1034 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WebMCP in Practice</title>
+    <meta name="description" content="What problem an in-app assistant actually has, what WebMCP is, and how the browser, backend and model communicate.">
+    <meta name="color-scheme" content="light dark">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+    <style>
+      /* Minimal reset. The hosted artifact gets this from its wrapper; a
+         standalone file has to bring its own. */
+      *, *::before, *::after { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body { margin: 0; }
+      img, svg, video { max-width: 100%; height: auto; }
+      table { border-collapse: collapse; }
+    </style>
+  </head>
+  <body>
+<style>
+  /* ---------- tokens: complete light palette on bare :root ---------- */
+  :root {
+    --ground: #f4f6f8;
+    --surface: #ffffff;
+    --surface-2: #fafbfc;
+    --ink: #14161a;
+    --ink-2: #4a5261;
+    --ink-3: #79818f;
+    --line: #e0e4ea;
+    --line-2: #eceff3;
+
+    /* The app's own semantic, carried through the document:
+       violet = executes in the page, amber = executes on the server. */
+    --page: #5b3fd6;
+    --page-soft: #efebfc;
+    --page-line: #cdc2f5;
+    --server: #9a6110;
+    --server-soft: #fbf2e1;
+    --server-line: #ecd8ae;
+
+    --good: #0f7a45;
+    --bad: #a3282a;
+    --bad-soft: #fdecec;
+
+    --shadow: 0 1px 2px rgba(18, 22, 30, .05), 0 8px 24px -18px rgba(18, 22, 30, .22);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0d0f13;
+      --surface: #16191f;
+      --surface-2: #1b1f27;
+      --ink: #e8ebf0;
+      --ink-2: #a3abb9;
+      --ink-3: #6f7784;
+      --line: #262b34;
+      --line-2: #1f242c;
+
+      --page: #a492ff;
+      --page-soft: #221c3a;
+      --page-line: #3a3060;
+      --server: #e0aa5c;
+      --server-soft: #2a2214;
+      --server-line: #4d3d1e;
+
+      --good: #5cc08c;
+      --bad: #e08a8a;
+      --bad-soft: #2b1a1c;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -20px rgba(0, 0, 0, .8);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0d0f13;
+    --surface: #16191f;
+    --surface-2: #1b1f27;
+    --ink: #e8ebf0;
+    --ink-2: #a3abb9;
+    --ink-3: #6f7784;
+    --line: #262b34;
+    --line-2: #1f242c;
+
+    --page: #a492ff;
+    --page-soft: #221c3a;
+    --page-line: #3a3060;
+    --server: #e0aa5c;
+    --server-soft: #2a2214;
+    --server-line: #4d3d1e;
+
+    --good: #5cc08c;
+    --bad: #e08a8a;
+    --bad-soft: #2b1a1c;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -20px rgba(0, 0, 0, .8);
+  }
+
+  /* ---------- base ---------- */
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 56px 28px 96px; }
+
+  h1, h2, h3, .display {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+    letter-spacing: -0.022em;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  .mono, code, pre, th, .eyebrow, .chip, .sidetag, figcaption .fignum {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  p { margin: 0; }
+  .prose { max-width: 66ch; }
+  .prose + .prose { margin-top: 14px; }
+  em { font-style: italic; }
+
+  a { color: var(--page); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--page); outline-offset: 2px; }
+
+  code {
+    font-size: .88em;
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  /* ---------- header ---------- */
+  header.head { display: flex; flex-direction: column; gap: 20px; }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  h1 { font-size: clamp(34px, 5.4vw, 52px); font-weight: 800; line-height: 1.04; }
+
+  .thesis {
+    font-size: clamp(19px, 2.2vw, 22px);
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 60ch;
+  }
+  .thesis strong { color: var(--ink); font-weight: 600; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip {
+    font-size: 11.5px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 72px; }
+  .sechead { display: flex; flex-direction: column; gap: 10px; margin-bottom: 26px; }
+  h2 { font-size: clamp(25px, 3vw, 32px); font-weight: 700; }
+  h3 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-family: "IBM Plex Mono", monospace;
+    margin-bottom: 12px;
+  }
+
+  /* ---------- requirement list: not a sequence, so no numbering ---------- */
+  .reqs { display: grid; gap: 10px; margin-top: 4px; }
+  .req {
+    display: grid;
+    grid-template-columns: 118px 1fr;
+    gap: 18px;
+    align-items: baseline;
+    padding: 15px 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+  }
+  .req-key {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .req-text { font-size: 15.5px; color: var(--ink-2); }
+  .req-text strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- failure modes ---------- */
+  .fails { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .fail {
+    padding: 18px 20px;
+    border-radius: 11px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--bad);
+  }
+  .fail-title { font-family: Archivo, sans-serif; font-weight: 700; font-size: 16px; margin-bottom: 7px; }
+  .fail-body { font-size: 15px; color: var(--ink-2); }
+  .fail-quote {
+    display: block;
+    margin-top: 10px;
+    padding-left: 12px;
+    border-left: 2px solid var(--line);
+    font-style: italic;
+    color: var(--ink-3);
+    font-size: 14.5px;
+  }
+
+  /* ---------- figures ---------- */
+  figure {
+    margin: 0;
+    padding: 24px 22px 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 13px;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  figure + .prose, figure + figure { margin-top: 26px; }
+  figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+
+  figcaption {
+    margin-top: 16px;
+    padding-top: 13px;
+    border-top: 1px solid var(--line-2);
+    font-size: 14.5px;
+    color: var(--ink-2);
+    max-width: 76ch;
+  }
+  figcaption .fignum {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-right: 9px;
+  }
+
+  /* diagram text + shapes inherit the theme through currentColor */
+  .dg { color: var(--ink); }
+  .dg-box { fill: var(--surface-2); stroke: currentColor; stroke-width: 1.25; }
+  .dg-box--page { fill: var(--page-soft); stroke: var(--page); }
+  .dg-box--server { fill: var(--server-soft); stroke: var(--server); }
+  .dg-box--bad { fill: var(--bad-soft); stroke: var(--bad); }
+  .dg-t { fill: currentColor; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .dg-t--sm { font-size: 10.5px; fill: var(--ink-3); }
+  .dg-t--hd { font-family: Archivo, sans-serif; font-size: 12.5px; font-weight: 700; letter-spacing: .02em; }
+  .dg-t--page { fill: var(--page); }
+  .dg-t--server { fill: var(--server); }
+  .dg-t--bad { fill: var(--bad); }
+  .dg-l { stroke: currentColor; stroke-width: 1.25; fill: none; }
+  .dg-l--page { stroke: var(--page); }
+  .dg-l--server { stroke: var(--server); }
+  .dg-l--dash { stroke-dasharray: 5 4; }
+  .dg-l--faint { stroke: var(--ink-3); stroke-width: 1; }
+  .dg-fill { fill: currentColor; }
+  .dg-fill--page { fill: var(--page); }
+  .dg-fill--server { fill: var(--server); }
+
+  /* ---------- code ---------- */
+  pre {
+    margin: 0;
+    padding: 18px 20px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    overflow-x: auto;
+    font-size: 12.8px;
+    line-height: 1.62;
+    color: var(--ink-2);
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; color: inherit; }
+  pre b { color: var(--ink); font-weight: 600; }
+  pre i { color: var(--ink-3); font-style: normal; }
+  pre .kp { color: var(--page); font-weight: 600; }
+  pre .ks { color: var(--server); font-weight: 600; }
+  .codepair { display: grid; gap: 14px; }
+  .codelabel { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 7px; }
+
+  /* ---------- side legend ---------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 2px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+  .swatch--page { background: var(--page); }
+  .swatch--server { background: var(--server); }
+
+  .sidetag {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 3px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .sidetag--page { background: var(--page-soft); color: var(--page); border: 1px solid var(--page-line); }
+  .sidetag--server { background: var(--server-soft); color: var(--server); border: 1px solid var(--server-line); }
+
+  /* ---------- tables ---------- */
+  .tablewrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 14px 16px 11px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
+  td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--line-2);
+    font-size: 15px;
+    color: var(--ink-2);
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td strong, .name { color: var(--ink); font-weight: 600; }
+  td code { font-size: 12.5px; }
+
+  /* ---------- callout ---------- */
+  .note {
+    padding: 20px 22px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--page);
+    box-shadow: var(--shadow);
+  }
+  .note--server { border-left-color: var(--server); }
+  .note .eyebrow { display: block; margin-bottom: 7px; }
+  .note p { font-size: 16px; max-width: 68ch; }
+  .note strong { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 76px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+    font-size: 13.5px;
+    color: var(--ink-3);
+    max-width: 76ch;
+  }
+  footer p + p { margin-top: 9px; }
+  footer code { font-size: 12.5px; }
+
+  @media (max-width: 720px) {
+    .wrap { padding: 40px 18px 72px; }
+    .req { grid-template-columns: 1fr; gap: 5px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <span class="eyebrow">Field notes · Portfolio POC</span>
+    <h1>WebMCP in Practice</h1>
+    <p class="thesis">
+      An assistant inside your own web app has a specific problem: it has no idea
+      what your app can do. <strong>WebMCP lets the page answer that question
+      itself</strong> — by registering its capabilities as callable tools instead of
+      leaving the agent to infer them from the rendering.
+    </p>
+    <div class="chips">
+      <span class="chip">navigator.modelContext</span>
+      <span class="chip">React + FastAPI + Postgres</span>
+      <span class="chip">13 tools · 10 in-page / 3 server</span>
+      <span class="chip">working POC</span>
+    </div>
+  </header>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">The problem</span>
+      <h2>Chat is not the hard part</h2>
+      <p class="prose">
+        Putting a chat panel in a web app is easy. Making it <em>do</em> anything is
+        where it falls apart, and it falls apart in two predictable directions.
+      </p>
+    </div>
+
+    <div class="fails">
+      <div class="fail">
+        <div class="fail-title">It describes instead of acting</div>
+        <div class="fail-body">
+          The assistant can read your data but cannot touch the app, so it hands the
+          work back to the user as instructions.
+          <span class="fail-quote">"Contract FL-0142 expires in 42 days. Open it and
+          click Renew to extend the term."</span>
+        </div>
+      </div>
+      <div class="fail">
+        <div class="fail-title">It acts blindly</div>
+        <div class="fail-body">
+          Given the DOM and a mandate, it guesses. It clicks the third row because the
+          third row was right last week. When it fails you get a stack trace about a
+          missing element, not a reason.
+          <span class="fail-quote">Error: no element matches
+          <code>.row:nth-child(3) button</code></span>
+        </div>
+      </div>
+    </div>
+
+    <p class="prose" style="margin-top: 24px;">
+      Both failures share one root cause. A language model shown a rendered page sees
+      markup or pixels — neither of which expresses <em>what the application can do</em>.
+      Capability and intent are exactly the things a rendering throws away.
+    </p>
+
+    <h3 style="margin-top: 40px;">What we actually needed</h3>
+    <div class="reqs">
+      <div class="req">
+        <span class="req-key">Discoverable</span>
+        <span class="req-text">The assistant learns what the app can do <strong>at runtime</strong>, from the app — not from a prompt someone remembered to update.</span>
+      </div>
+      <div class="req">
+        <span class="req-key">Visible</span>
+        <span class="req-text">When it acts, <strong>the screen changes while the user watches.</strong> A renewal that happens silently in a database is indistinguishable from a lie.</span>
+      </div>
+      <div class="req">
+        <span class="req-key">Legible</span>
+        <span class="req-text">Failures come back as <strong>reasons</strong>, not selector errors: <em>"no contract with id FL-9999 — call search_contracts for valid ids"</em>.</span>
+      </div>
+      <div class="req">
+        <span class="req-key">Durable</span>
+        <span class="req-text">A redesign changes markup. It <strong>must not change the contract</strong> between the app and the assistant.</span>
+      </div>
+      <div class="req">
+        <span class="req-key">Supervised</span>
+        <span class="req-text">Consequential work <strong>pauses for a human.</strong> The assistant may prepare a bulk renewal; a person commits it.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">The solution</span>
+      <h2>Let the page declare itself</h2>
+      <p class="prose">
+        MCP — the Model Context Protocol — is a standard way for a model to discover
+        tools and call them by name. WebMCP is that idea moved inside the browser tab:
+        a page exposes its own capabilities through
+        <code>navigator.modelContext</code>, and any agent with access to the page can
+        list them and invoke them.
+      </p>
+      <p class="prose">
+        The inversion is the whole point. Instead of the agent inferring what it can do
+        from what it can see, <strong>the application states what it can do.</strong>
+      </p>
+    </div>
+
+    <figure>
+      <svg class="dg" viewBox="0 0 900 372" role="img"
+           aria-label="Two approaches compared. On the left, an agent reads the rendered DOM, infers a CSS selector, and dispatches a synthetic click; a redesign breaks the inference step. On the right, the page registers tools with names and schemas, the agent reads that registry, and calls a tool by name; a redesign changes markup but not the tool contract.">
+        <!-- divider -->
+        <line class="dg-l dg-l--faint" x1="450" y1="34" x2="450" y2="352"/>
+
+        <!-- ============ LEFT: infer ============ -->
+        <text class="dg-t dg-t--hd dg-t--bad" x="30" y="22">A · Infer from the rendering</text>
+
+        <rect class="dg-box" x="30" y="42" width="330" height="46" rx="7"/>
+        <text class="dg-t" x="46" y="63">Rendered DOM</text>
+        <text class="dg-t dg-t--sm" x="46" y="79">tables, buttons, class names</text>
+
+        <line class="dg-l" x1="195" y1="88" x2="195" y2="132" marker-end="url(#ar)"/>
+        <text class="dg-t dg-t--sm" x="205" y="114">reads markup</text>
+
+        <rect class="dg-box dg-box--bad" x="30" y="132" width="330" height="46" rx="7"/>
+        <text class="dg-t" x="46" y="153">Agent infers a selector</text>
+        <text class="dg-t dg-t--sm" x="46" y="169">.row:nth-child(3) button</text>
+
+        <line class="dg-l" x1="195" y1="178" x2="195" y2="222" marker-end="url(#ar)"/>
+        <text class="dg-t dg-t--sm" x="205" y="204">guesses</text>
+
+        <rect class="dg-box" x="30" y="222" width="330" height="46" rx="7"/>
+        <text class="dg-t" x="46" y="243">Synthetic click</text>
+        <text class="dg-t dg-t--sm" x="46" y="259">hopes it hit the right row</text>
+
+        <line class="dg-l dg-l--dash" x1="30" y1="300" x2="360" y2="300"/>
+        <text class="dg-t dg-t--sm dg-t--bad" x="30" y="322">A redesign renames the class —</text>
+        <text class="dg-t dg-t--sm dg-t--bad" x="30" y="338">the middle step silently breaks.</text>
+
+        <!-- ============ RIGHT: declare ============ -->
+        <text class="dg-t dg-t--hd dg-t--page" x="490" y="22">B · Declare the capability</text>
+
+        <rect class="dg-box dg-box--page" x="490" y="42" width="330" height="46" rx="7"/>
+        <text class="dg-t" x="506" y="63">Page registers its tools</text>
+        <text class="dg-t dg-t--sm" x="506" y="79">name · description · JSON Schema · handler</text>
+
+        <line class="dg-l dg-l--page" x1="655" y1="88" x2="655" y2="132" marker-end="url(#arp)"/>
+        <text class="dg-t dg-t--sm" x="665" y="114">declares</text>
+
+        <rect class="dg-box" x="490" y="132" width="330" height="46" rx="7"/>
+        <text class="dg-t" x="506" y="153">Agent reads the registry</text>
+        <text class="dg-t dg-t--sm" x="506" y="169">listTools() — no markup involved</text>
+
+        <line class="dg-l dg-l--page" x1="655" y1="178" x2="655" y2="222" marker-end="url(#arp)"/>
+        <text class="dg-t dg-t--sm" x="665" y="204">calls by name</text>
+
+        <rect class="dg-box dg-box--page" x="490" y="222" width="330" height="46" rx="7"/>
+        <text class="dg-t" x="506" y="243">executeTool('renew_contract', …)</text>
+        <text class="dg-t dg-t--sm" x="506" y="259">the app's own function runs</text>
+
+        <line class="dg-l dg-l--dash dg-l--page" x1="490" y1="300" x2="820" y2="300"/>
+        <text class="dg-t dg-t--sm dg-t--page" x="490" y="322">A redesign changes markup, not the</text>
+        <text class="dg-t dg-t--sm dg-t--page" x="490" y="338">tool contract. Nothing to re-infer.</text>
+
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path class="dg-fill" d="M0,1 L9,5 L0,9 z"/>
+          </marker>
+          <marker id="arp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path class="dg-fill--page" d="M0,1 L9,5 L0,9 z"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>
+        <span class="fignum">Fig 1</span>
+        The same three-step shape, two different middle steps. Scraping puts a guess in
+        the middle of the chain, and that guess is what a redesign breaks. Declaring
+        capabilities removes the guess: the agent addresses a named function with a
+        typed argument list.
+      </figcaption>
+    </figure>
+
+    <h3 style="margin-top: 44px;">What a registered tool looks like</h3>
+    <p class="prose" style="margin-bottom: 16px;">
+      A tool is four things: a name, a description the model reads to decide when to use
+      it, a JSON Schema for its arguments, and a function. In our app the function is an
+      ordinary React handler — which is why calling it moves the UI.
+    </p>
+
+    <pre><code>registerTool({
+  <b>name</b>: 'renew_contract',
+  <b>description</b>:
+    'Renew a contract: the new term starts the day the old one ends, so cover
+     stays continuous. Leave premium and sum_insured alone unless the user
+     asked to change them. Clears the renewal_pending flag.',
+  <b>inputSchema</b>: {
+    type: 'object',
+    properties: {
+      contract_id: { type: 'string' },
+      months:      { type: 'integer', description: 'Defaults to 12.' },
+    },
+    required: ['contract_id'],
+  },
+  <b>async execute</b>({ contract_id, months = 12 }) {
+    const renewed = await api.renewContract(contract_id, { months });
+
+    <span class="kp">setRoute({ view: 'contract', contractId: contract_id });</span>  <i>// the view moves</i>
+    <span class="kp">flash(contract_id);</span>                                       <i>// the row pulses</i>
+
+    return toolResult({ ok: true, contract: renewed });
+  },
+});</code></pre>
+
+    <div class="note" style="margin-top: 22px;">
+      <span class="eyebrow">Why the description matters more than it looks</span>
+      <p>
+        That paragraph of prose is not documentation for humans — it is the only thing
+        the model reads when deciding whether this tool fits the request. Ours tells it
+        the term rolls from the current expiry, and not to touch pricing uninvited.
+        <strong>Tool descriptions are prompt engineering</strong>, and they live next to
+        the code they describe.
+      </p>
+    </div>
+
+    <h3 style="margin-top: 44px;">The surface</h3>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Call</th><th>Who uses it</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>registerTool(descriptor)</code></td>
+            <td>the page</td>
+            <td>Publishes one capability. Returns a handle with <code>unregister()</code>.</td>
+          </tr>
+          <tr>
+            <td><code>unregisterTool(name)</code></td>
+            <td>the page</td>
+            <td>Withdraws it — a tool that is not currently valid should not be listed.</td>
+          </tr>
+          <tr>
+            <td><code>provideContext({ tools })</code></td>
+            <td>the page</td>
+            <td>Replaces the whole set at once, for pages that rebuild it wholesale.</td>
+          </tr>
+          <tr>
+            <td><code>listTools()</code></td>
+            <td>the agent</td>
+            <td>Reads names, descriptions and schemas. Never the implementations.</td>
+          </tr>
+          <tr>
+            <td><code>callTool(name, args)</code></td>
+            <td>the agent</td>
+            <td>Invokes one and awaits an MCP-shaped result.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="prose" style="margin-top: 16px;">
+      The first three are the page's half and are what the proposal specifies. The last
+      two are the agent's half — and today, in a browser without native support, you
+      supply both. Ours lives in a polyfill that stubs the page-side API and keeps a
+      mirror of the registry so the agent-side calls work either way.
+    </p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">How it communicates</span>
+      <h2>Three participants, two boundaries</h2>
+      <p class="prose">
+        The agent does not live in the page. That is not an accident of our design — it
+        is what makes the model's job possible at all: it runs where the API key is. So
+        every tool call has to cross a network boundary and come back.
+      </p>
+      <div class="legend">
+        <span class="legend-item"><span class="swatch swatch--page"></span> Executes in the page</span>
+        <span class="legend-item"><span class="swatch swatch--server"></span> Executes on the server</span>
+      </div>
+    </div>
+
+    <figure>
+      <svg class="dg" viewBox="0 0 900 300" role="img"
+           aria-label="Topology. The browser holds React state and ten registered page tools. The backend holds the agent loop and three server tools. The Claude API holds the model and no tools at all. The browser and backend are joined by a WebSocket; the backend and the API by HTTPS.">
+        <!-- browser -->
+        <rect class="dg-box dg-box--page" x="20" y="44" width="250" height="196" rx="10"/>
+        <text class="dg-t dg-t--hd" x="38" y="70">Browser tab</text>
+        <text class="dg-t dg-t--sm" x="38" y="88">the user is looking at this</text>
+        <line class="dg-l dg-l--faint" x1="38" y1="102" x2="252" y2="102"/>
+        <text class="dg-t" x="38" y="126">React state</text>
+        <text class="dg-t dg-t--sm" x="38" y="142">contracts · route · filters · form</text>
+        <text class="dg-t dg-t--page" x="38" y="172">10 registered tools</text>
+        <text class="dg-t dg-t--sm" x="38" y="188">navigate · search · forms ·</text>
+        <text class="dg-t dg-t--sm" x="38" y="204">per-record writes · show artifact</text>
+        <text class="dg-t dg-t--sm" x="38" y="228">navigator.modelContext</text>
+
+        <!-- backend -->
+        <rect class="dg-box" x="325" y="44" width="250" height="196" rx="10"/>
+        <text class="dg-t dg-t--hd" x="343" y="70">Backend</text>
+        <text class="dg-t dg-t--sm" x="343" y="88">holds the API key</text>
+        <line class="dg-l dg-l--faint" x1="343" y1="102" x2="557" y2="102"/>
+        <text class="dg-t" x="343" y="126">The agent loop</text>
+        <text class="dg-t dg-t--sm" x="343" y="142">routes each call to a side</text>
+        <text class="dg-t dg-t--server" x="343" y="172">3 server tools</text>
+        <text class="dg-t dg-t--sm" x="343" y="188">bulk renewal · report ·</text>
+        <text class="dg-t dg-t--sm" x="343" y="204">market benchmark</text>
+        <text class="dg-t dg-t--sm" x="343" y="228">FastAPI + Postgres</text>
+
+        <!-- model -->
+        <rect class="dg-box" x="630" y="44" width="250" height="196" rx="10"/>
+        <text class="dg-t dg-t--hd" x="648" y="70">Claude</text>
+        <text class="dg-t dg-t--sm" x="648" y="88">decides, never executes</text>
+        <line class="dg-l dg-l--faint" x1="648" y1="102" x2="862" y2="102"/>
+        <text class="dg-t" x="648" y="126">Sees one flat tool list</text>
+        <text class="dg-t dg-t--sm" x="648" y="142">13 tools, no marking of which</text>
+        <text class="dg-t dg-t--sm" x="648" y="158">side executes them</text>
+        <text class="dg-t" x="648" y="192">Holds zero tools</text>
+        <text class="dg-t dg-t--sm" x="648" y="208">it only names one and waits</text>
+
+        <!-- links -->
+        <line class="dg-l" x1="270" y1="142" x2="325" y2="142" marker-start="url(#ar2)" marker-end="url(#ar2)"/>
+        <text class="dg-t dg-t--sm" x="252" y="266">WebSocket</text>
+        <line class="dg-l dg-l--faint" x1="297" y1="150" x2="297" y2="258"/>
+
+        <line class="dg-l" x1="575" y1="142" x2="630" y2="142" marker-start="url(#ar2)" marker-end="url(#ar2)"/>
+        <text class="dg-t dg-t--sm" x="556" y="266">HTTPS · Messages API</text>
+        <line class="dg-l dg-l--faint" x1="602" y1="150" x2="602" y2="258"/>
+
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path class="dg-fill" d="M0,1 L9,5 L0,9 z"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>
+        <span class="fignum">Fig 2</span>
+        Where things live. Tools exist at both ends; the model holds none of them — it
+        only ever names one and waits for a result. The backend's job is to decide, per
+        call, whether that name belongs to the browser or to itself.
+      </figcaption>
+    </figure>
+
+    <p class="prose" style="margin-top: 26px;">
+      Fig 2 says who holds what. The sequence below says what moves, and in what order —
+      the part that is genuinely hard to reconstruct from prose.
+    </p>
+
+    <figure style="margin-top: 20px;">
+      <svg class="dg" viewBox="0 0 900 540" role="img"
+           aria-label="Sequence of one turn. The browser sends a user message together with its live tool list to the backend. The backend calls Claude with messages and tools. Claude returns stop reason tool_use. The backend forwards the tool_use to the browser, which executes it against React state and repaints. The browser returns a JSON tool result. The backend appends it and calls Claude again. Claude returns text, which the backend streams to the browser.">
+        <!-- lifelines -->
+        <rect class="dg-box dg-box--page" x="40" y="14" width="190" height="38" rx="7"/>
+        <text class="dg-t dg-t--hd" x="66" y="38">Browser</text>
+        <line class="dg-l dg-l--faint" x1="135" y1="52" x2="135" y2="512"/>
+
+        <rect class="dg-box" x="355" y="14" width="190" height="38" rx="7"/>
+        <text class="dg-t dg-t--hd" x="392" y="38">Backend</text>
+        <line class="dg-l dg-l--faint" x1="450" y1="52" x2="450" y2="512"/>
+
+        <rect class="dg-box" x="670" y="14" width="190" height="38" rx="7"/>
+        <text class="dg-t dg-t--hd" x="710" y="38">Claude</text>
+        <line class="dg-l dg-l--faint" x1="765" y1="52" x2="765" y2="512"/>
+
+        <!-- 1 -->
+        <line class="dg-l dg-l--page" x1="135" y1="92" x2="443" y2="92" marker-end="url(#ar3p)"/>
+        <text class="dg-t dg-t--sm" x="152" y="84">1 · user message + listTools()</text>
+        <text class="dg-t dg-t--sm dg-t--page" x="152" y="108">the live tool list travels with every message</text>
+
+        <!-- 2 -->
+        <line class="dg-l" x1="450" y1="140" x2="758" y2="140" marker-end="url(#ar3)"/>
+        <text class="dg-t dg-t--sm" x="467" y="132">2 · messages + 13 tool definitions</text>
+
+        <!-- loop frame: the mechanism, drawn rather than described -->
+        <rect class="dg-l dg-l--dash" x="22" y="156" width="856" height="240" rx="6" fill="none"/>
+        <rect class="dg-box" x="22" y="156" width="54" height="20" rx="4"/>
+        <text class="dg-t dg-t--sm" x="32" y="170">loop</text>
+
+        <!-- 3 -->
+        <line class="dg-l" x1="765" y1="180" x2="457" y2="180" marker-end="url(#ar3)"/>
+        <text class="dg-t dg-t--sm" x="478" y="172">3 · stop_reason: tool_use → search_contracts</text>
+
+        <!-- 4 -->
+        <line class="dg-l dg-l--page" x1="450" y1="220" x2="142" y2="220" marker-end="url(#ar3p)"/>
+        <text class="dg-t dg-t--sm" x="176" y="211">4 · tool_use forwarded to the page</text>
+
+        <!-- 5 self-action -->
+        <rect class="dg-box dg-box--page" x="60" y="240" width="150" height="60" rx="7"/>
+        <text class="dg-t dg-t--page" x="74" y="261">5 · executeTool()</text>
+        <text class="dg-t dg-t--sm" x="74" y="277">→ React state</text>
+        <text class="dg-t dg-t--sm" x="74" y="293">→ screen repaints</text>
+        <text class="dg-t dg-t--sm dg-t--page" x="228" y="266">this is the moment the user</text>
+        <text class="dg-t dg-t--sm dg-t--page" x="228" y="282">sees the app change</text>
+
+        <!-- 6 -->
+        <line class="dg-l dg-l--page" x1="135" y1="330" x2="443" y2="330" marker-end="url(#ar3p)"/>
+        <text class="dg-t dg-t--sm" x="152" y="322">6 · tool_result: { count: 11, … }</text>
+
+        <!-- 7 -->
+        <line class="dg-l" x1="450" y1="370" x2="758" y2="370" marker-end="url(#ar3)"/>
+        <text class="dg-t dg-t--sm" x="467" y="362">7 · result appended</text>
+
+        <!-- 8 -->
+        <line class="dg-l" x1="765" y1="426" x2="457" y2="426" marker-end="url(#ar3)"/>
+        <text class="dg-t dg-t--sm" x="513" y="418">8 · stop_reason: end_turn → text</text>
+
+        <!-- 9 -->
+        <line class="dg-l dg-l--page" x1="450" y1="466" x2="142" y2="466" marker-end="url(#ar3p)"/>
+        <text class="dg-t dg-t--sm" x="176" y="458">9 · text streamed to the chat panel</text>
+
+        <defs>
+          <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path class="dg-fill" d="M0,1 L9,5 L0,9 z"/>
+          </marker>
+          <marker id="ar3p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path class="dg-fill--page" d="M0,1 L9,5 L0,9 z"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>
+        <span class="fignum">Fig 3</span>
+        One turn. Everything inside the dashed frame repeats for as long as Claude keeps
+        naming tools: it names one, someone executes it, the result goes back. Step 5 is
+        the only step the user perceives — and the only one that touches the page.
+      </figcaption>
+    </figure>
+
+    <div class="note" style="margin-top: 26px;">
+      <span class="eyebrow">Why the tool list is re-sent every message</span>
+      <p>
+        Step 1 looks wasteful and is not. The registered set genuinely changes as the
+        user navigates — a tool that only makes sense on the detail view is registered
+        when that view mounts and withdrawn when it unmounts.
+        <strong>Re-sending the list is how the model finds out.</strong> That is dynamic
+        capability discovery, and it is the reason registration is a lifecycle concern
+        rather than a config file.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">The other half</span>
+      <h2>Work that has no business in a UI</h2>
+      <p class="prose">
+        Not everything should be driven through the page. Renewing fourteen contracts by
+        calling a page tool fourteen times is fourteen round-trips through the model, any
+        of which can stop halfway and leave the book half-renewed. Assembling a report is
+        computation, not clicking. Market benchmark rates live outside the application
+        entirely.
+      </p>
+      <p class="prose">
+        So those became <span class="sidetag sidetag--server">server</span> tools: they
+        run in the backend, in one transaction, and never touch the browser. Which
+        creates a new problem — <strong>server work is invisible.</strong> The fix is the
+        pattern below.
+      </p>
+    </div>
+
+    <figure>
+      <svg class="dg" viewBox="0 0 900 296" role="img"
+           aria-label="The handoff. A server tool previews a bulk renewal and changes nothing. After the user agrees, the same server tool commits in one transaction and returns a batch id. The assistant then calls a page tool with that id, which navigates the user's view to the result.">
+        <!-- step 1 -->
+        <rect class="dg-box dg-box--server" x="20" y="52" width="250" height="86" rx="9"/>
+        <text class="dg-t dg-t--server" x="36" y="76">1 · run_renewal_batch</text>
+        <text class="dg-t dg-t--sm" x="36" y="96">{ expiring_within_days: 30 }</text>
+        <text class="dg-t dg-t--sm" x="36" y="116">previews 4 contracts</text>
+        <text class="dg-t dg-t--sm dg-t--server" x="36" y="132">changes nothing</text>
+
+        <!-- gate -->
+        <line class="dg-l" x1="270" y1="95" x2="318" y2="95" marker-end="url(#ar4)"/>
+        <text class="dg-t dg-t--sm" x="272" y="82">human</text>
+        <text class="dg-t dg-t--sm" x="272" y="120">agrees</text>
+
+        <!-- step 2 -->
+        <rect class="dg-box dg-box--server" x="325" y="52" width="250" height="86" rx="9"/>
+        <text class="dg-t dg-t--server" x="341" y="76">2 · run_renewal_batch</text>
+        <text class="dg-t dg-t--sm" x="341" y="96">{ …, commit: true }</text>
+        <text class="dg-t dg-t--sm" x="341" y="116">one transaction, all or nothing</text>
+        <text class="dg-t dg-t--sm dg-t--server" x="341" y="132">returns BATCH-0002</text>
+
+        <!-- handoff -->
+        <line class="dg-l dg-l--page" x1="575" y1="95" x2="623" y2="95" marker-end="url(#ar4p)"/>
+        <text class="dg-t dg-t--sm dg-t--page" x="574" y="82">artifact</text>
+        <text class="dg-t dg-t--sm dg-t--page" x="574" y="120">id</text>
+
+        <!-- step 3 -->
+        <rect class="dg-box dg-box--page" x="630" y="52" width="250" height="86" rx="9"/>
+        <text class="dg-t dg-t--page" x="646" y="76">3 · show_batch_result</text>
+        <text class="dg-t dg-t--sm" x="646" y="96">{ batch_id: 'BATCH-0002' }</text>
+        <text class="dg-t dg-t--sm" x="646" y="116">the user's view navigates</text>
+        <text class="dg-t dg-t--sm dg-t--page" x="646" y="132">to the result</text>
+
+        <!-- lanes -->
+        <line class="dg-l dg-l--dash dg-l--server" x1="20" y1="176" x2="575" y2="176"/>
+        <text class="dg-t dg-t--sm dg-t--server" x="20" y="198">runs on the server · the browser is not involved</text>
+        <text class="dg-t dg-t--sm dg-t--server" x="20" y="214">the user sees nothing happen here</text>
+
+        <line class="dg-l dg-l--dash dg-l--page" x1="630" y1="176" x2="880" y2="176"/>
+        <text class="dg-t dg-t--sm dg-t--page" x="630" y="198">runs in the page ·</text>
+        <text class="dg-t dg-t--sm dg-t--page" x="630" y="214">the only visible step</text>
+
+        <text class="dg-t dg-t--sm" x="20" y="266">Every server tool ends with a page tool. Work happens off-page;</text>
+        <text class="dg-t dg-t--sm" x="20" y="282">the result still lands on-page.</text>
+
+        <defs>
+          <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path class="dg-fill" d="M0,1 L9,5 L0,9 z"/>
+          </marker>
+          <marker id="ar4p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path class="dg-fill--page" d="M0,1 L9,5 L0,9 z"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>
+        <span class="fignum">Fig 4</span>
+        The handoff, and the supervision gate. Step 1 is a dry run because
+        <code>commit</code> defaults to false — a bulk mutation should not happen because
+        a model was reasonably confident it was wanted.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Implementation note</span>
+      <h2>The trap that costs everyone a day</h2>
+      <p class="prose">
+        Registration looks like a mount-time concern, so the obvious code is an effect
+        with an empty dependency array. That is wrong in a way that does not announce
+        itself: the handler closes over the state that existed at mount, and keeps
+        returning it forever.
+      </p>
+    </div>
+
+    <div class="codepair">
+      <div>
+        <div class="codelabel">Wrong — silently stale</div>
+        <pre><code>useEffect(() => {
+  const handle = registerTool({
+    name: 'search_contracts',
+    execute: () => filter(<b>contracts</b>),   <i>// frozen at mount, forever</i>
+  });
+  return () => handle.unregister();
+}, []);</code></pre>
+      </div>
+      <div>
+        <div class="codelabel">Also wrong — churns the registry</div>
+        <pre><code>useEffect(() => {
+  <i>/* … same registration … */</i>
+}, [<b>contracts</b>]);   <i>// re-registers on every keystroke; an
+                 in-flight call can be pulled out from
+                 under the agent mid-execution</i></code></pre>
+      </div>
+      <div>
+        <div class="codelabel">Right — stable registration, fresh handler</div>
+        <pre><code>const latest = useRef(tools);
+latest.current = tools;              <i>// refreshed every render</i>
+
+useEffect(() => {
+  const handles = latest.current.map(({ name, description, inputSchema }) =>
+    registerTool({
+      name, description, inputSchema,
+      <i>// late-bound: resolve the handler at call time, not register time</i>
+      execute: (args) =&gt; latest.current.find((t) =&gt; t.name === name).execute(args),
+    })
+  );
+  return () =&gt; handles.forEach((h) =&gt; h.unregister());
+}, []);   <i>// registration really is mount-only — the indirection does the rest</i></code></pre>
+      </div>
+    </div>
+
+    <p class="prose" style="margin-top: 20px;">
+      Register once, resolve late. Names and schemas are static; handlers are re-created
+      every render and always see current state. Under React StrictMode's double-mount
+      you can verify it by counting: exactly ten tools registered, not twenty and not
+      zero.
+    </p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <div class="sechead">
+      <span class="eyebrow">Where it fits</span>
+      <h2>What WebMCP is and is not for</h2>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>The assistant needs to…</th><th>Reach for</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Move the user's view</strong><br>navigate, open a record, switch tabs</td>
+            <td><span class="sidetag sidetag--page">page</span> &nbsp;Nothing server-side can do this.</td>
+          </tr>
+          <tr>
+            <td><strong>Fill a form and stop</strong><br>prepare work, let a person commit it</td>
+            <td><span class="sidetag sidetag--page">page</span> &nbsp;The form only exists in the tab.</td>
+          </tr>
+          <tr>
+            <td><strong>Change what the user is looking at</strong><br>filters, sorting, selection</td>
+            <td><span class="sidetag sidetag--page">page</span> &nbsp;View state is per-user and lives in the client.</td>
+          </tr>
+          <tr>
+            <td><strong>Read or write data</strong><br>fetch a record, save an edit</td>
+            <td><span class="sidetag sidetag--server">server</span> &nbsp;Goes through your API regardless. A page tool buys you only the repaint.</td>
+          </tr>
+          <tr>
+            <td><strong>Bulk work, documents, external data</strong></td>
+            <td><span class="sidetag sidetag--server">server</span> &nbsp;Then hand off to a page tool to show the result.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note note--server" style="margin-top: 24px;">
+      <span class="eyebrow">The honest summary</span>
+      <p>
+        Of the ten tools we registered in the page, four jobs genuinely required it:
+        navigation, form prefill, making view state visible, and delivering server
+        artifacts to the screen. The reads and writes could all have been server tools.
+        <strong>WebMCP earns its keep on UI state, not on data state</strong> — and that
+        is the most useful thing this POC established.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      <strong>Status.</strong> WebMCP is a proposal; native <code>navigator.modelContext</code>
+      is not something to rely on yet. This POC ships a polyfill that stubs the page-side
+      API when it is absent and logs every registration and invocation to the console, so
+      the app behaves identically either way and the header badge tells you which one you
+      got.
+    </p>
+    <p>
+      <strong>Scope.</strong> Everything described here runs: tool registration and its
+      lifecycle, JSON Schema declarations, discovery, invocation, MCP result and error
+      shapes, and the routing of each call to the browser or the backend. Verified against
+      live Claude driving the real UI. Contract data is synthetic — insured companies are
+      fictional and no figure represents a real policy.
+    </p>
+  </footer>
+
+</div>
+  </body>
+</html>
