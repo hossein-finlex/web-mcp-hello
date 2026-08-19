@@ -1,0 +1,26 @@
+# Postgres for the contract portfolio.
+#
+# Port 5434 on purpose: 5432 is a local Homebrew postgres and 5433 is another
+# project's container on this machine. Change POSTGRES_PORT in backend/.env if
+# you need a different one.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: webmcp-portfolio-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: portfolio
+      POSTGRES_PASSWORD: portfolio
+      POSTGRES_DB: portfolio
+    ports:
+      - "5434:5432"
+    volumes:
+      - portfolio-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portfolio -d portfolio"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  portfolio-data:

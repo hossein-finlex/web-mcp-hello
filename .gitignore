@@ -1,0 +1,26 @@
+# --- secrets: never commit -------------------------------------------------
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+*.pem
+*.key
+
+# --- dependencies & build artifacts ---------------------------------------
+node_modules/
+build/
+backend/.venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# --- local noise ----------------------------------------------------------
+.DS_Store
+*.log
+npm-debug.log*
+yarn-error.log*
+.idea/
+.vscode/
